@@ -1,3 +1,4 @@
+package c06.purely_functional_state
 import annotation.tailrec
 
 trait RNG {
@@ -28,6 +29,9 @@ object RNG {
       case (x, y) => (x.abs, y)
     }
   }
+
+  def boolean(rng: RNG): (Boolean, RNG) =
+    rng.nextInt match { case (i,rng2) => (i%2==0,rng2) }
   // We need to be quite careful not to skew the generator.
   // Since `Int.Minvalue` is 1 smaller than `-(Int.MaxValue)`,
   // it suffices to increment the negative numbers by 1 and make them positive.
@@ -233,7 +237,6 @@ object randoms {
     println(RNG.map2ViaFlatMap(RNG.int, RNG.int)(_ + _)(myRng))
   }
 }
-
 sealed trait Input
 case object Coin extends Input
 case object Turn extends Input

@@ -127,7 +127,6 @@ object Stream {
     println(myStream.forAll(_ <10))
     println(constant(10).filter(_ %2 == 0).take(20).toList)
     println(from(10).filter(_ %2 == 0).take(20).toList)
-    print(fibs().take(10).toList)
   }
 
 }
