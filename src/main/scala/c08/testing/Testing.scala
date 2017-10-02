@@ -6,16 +6,50 @@ import scala.collection.mutable
 import Prop._
 import Gen._
 import c08.testing.Gen.Domain
-/**
-  * Created by siem on 25/09/2017.
-  */
 
-//sealed trait Gen[+A]
+
+trait Status
+case object Proven extends Status
+case object Unfalsified extends Status
+
+case class Prop(run: (TestCases,RNG) => Result){
+  def &&(p: Prop): Prop = ???
+  def ||(p: Prop): Prop = ???
+}
 
 object Prop {
+  type TestCases = Int
+  type Result = Either[FailedCase, (Status,SuccessCount)]
   type FailedCase = String
   type SuccessCount = Int
+
+  def forAll[A](a: Gen[A])(f: A => Boolean): Prop = Prop {
+    (n,rng) => {
+      def go(i: Int, j: Int, s: Stream[Option[A]], onEnd: Int => Result): Result =
+        if (i == j) Right((Unfalsified, i))
+        else s.uncons match {
+          case Some((Some(h),t)) =>
+            try { if (f(h)) go(i+1,j,s,onEnd)
+              else Left(h.toString) }
+            catch { case e: Exception => Left(buildMsg(h, e)) }
+          case Some((None,_)) => Right((Unfalsified,i))
+          case None        => onEnd(i)
+        }
+      go(0, n/3, a.exhaustive, i => Right((Proven, i))) match {
+        case Right((Unfalsified,_)) =>
+          val rands = randomStream(a)(rng).map(Some(_))
+          go(n/3, n, rands, i => Right((Unfalsified, i)))
+        case s => s
+      }
+    }
+  }
+
+  def buildMsg[A](s: A, e: Exception): String =
+    "test case: " + s + "\n" +
+      "generated an exception: " + e.getMessage + "\n" +
+      "stack trace:\n" + e.getStackTrace.mkString("\n")
 }
+
 case class Gen[+A](sample: State[RNG,A], exhaustive: Domain[A]){
   def map[B](f: A => B): Gen[B] = Gen(
     sample.map(f), exhaustive.map(_ map f)
@@ -23,9 +57,20 @@ case class Gen[+A](sample: State[RNG,A], exhaustive: Domain[A]){
   def map2[B,C](g: Gen[B])(f: (A,B) => C): Gen[C] = Gen(
     sample.map2(g.sample)(f), map2Stream(exhaustive,g.exhaustive)(map2Option(_,_)(f))
   )
+  def flatMap[B](f: A => Gen[B]): Gen[B] =
+    Gen(sample.flatMap(a => f(a).sample),
+    exhaustive.flatMap {
+      case None => unbounded
+      case Some(a) => f(a).exhaustive
+    }
+  )
+
+  def listOfN(size: Gen[Int]): Gen[List[A]] =
+    size.flatMap(n => Gen.listOfN(n, this))
+
 }
 
-trait Prop { def check: Either[FailedCase,SuccessCount] }
+
 object Gen {
   type Domain[+A] = Stream[Option[A]]
   def bounded[A](a: Stream[A]): Domain[A] = a map (Some(_))
@@ -42,12 +87,38 @@ object Gen {
   def listOfN[A](n: Int, g: Gen[A]): Gen[List[A]] =
     Gen(State.sequence(List.fill(n)(g.sample)), Stream())
 
+  def listOfN_1[A](n: Int, g: Gen[A]): Gen[List[A]] =
+    List.fill(n)(g).foldRight(unit(List[A]()))((x, acc) => x.map2(acc)(_ :: _))
+
   def uniform: Gen[Double] = Gen(State(RNG.double), unbounded)
 
   def choose(i: Double, j: Double): Gen[Double] =
     Gen(State(RNG.double).map(a => i + a*(j-i)),
       unbounded)
   //def forAll[A](gen: List[A])(f: A => Boolean): Prop =
+  def even(start: Int, stopExclusive: Int): Gen[Int] =
+    choose(start, if (stopExclusive%2 == 0) stopExclusive - 1 else stopExclusive).
+      map (n => if (n%2 != 0) n+1 else n)
+
+  def odd(start: Int, stopExclusive: Int): Gen[Int] =
+    choose(start, if (stopExclusive%2 != 0) stopExclusive - 1 else stopExclusive).
+      map (n => if (n%2 == 0) n+1 else n)
+
+  def sameParity(from: Int, to: Int): Gen[(Int,Int)] = for {
+    i <- choose(from,to)
+    j <- if (i%2==0) even(from,to) else odd(from,to)
+  } yield (i,j)
+
+  def union[A](g1: Gen[A], g2: Gen[A]): Gen[A] =
+    boolean.flatMap(x => if (x) g1 else g2)
+
+  def weighted[A](g1: (Gen[A],Double), g2: (Gen[A],Double)): Gen[A] = {
+    val threshold = g1._2 / (g1._2 + g2._2)
+    uniform.flatMap(d => if (d < threshold) g1._1 else g2._1)
+  }
+
+  def randomStream[A](g: Gen[A])(rng: RNG): Stream[A] =
+    Stream.unfold(rng)(rng => Some(g.sample.run(rng)))
 
   def main(args: Array[String]): Unit = {
     val myRng = RNG.simple(11223)
