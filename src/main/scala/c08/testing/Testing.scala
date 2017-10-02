@@ -13,8 +13,18 @@ case object Proven extends Status
 case object Unfalsified extends Status
 
 case class Prop(run: (TestCases,RNG) => Result){
-  def &&(p: Prop): Prop = ???
-  def ||(p: Prop): Prop = ???
+  def &&(p: Prop): Prop = Prop {
+    (n, rng) => run(n,rng) match {
+      case Right((status, count)) => p.run(n,rng).right.map { case (s,m) => (s,n+m) }
+      case l => l
+    }
+  }
+  def ||(p: Prop): Prop = Prop {
+    (n, rng) => run(n,rng) match {
+      case Left(_) => p.run(n, rng)
+      case r => r
+    }
+  }
 }
 
 object Prop {
@@ -68,6 +78,7 @@ case class Gen[+A](sample: State[RNG,A], exhaustive: Domain[A]){
   def listOfN(size: Gen[Int]): Gen[List[A]] =
     size.flatMap(n => Gen.listOfN(n, this))
 
+  def unsized: SGen[A] = SGen(_ => this)
 }
 
 
@@ -137,4 +148,7 @@ object Gen {
    */
   def map2Stream[A,B,C](sa: Stream[A], sb: => Stream[B])(f: (A,=>B) => C): Stream[C] =
     for { a <- sa; b <- sb } yield f(a,b)
+}
+case class SGen[+A](forSize: Int => Gen[A]) {
+
 }
